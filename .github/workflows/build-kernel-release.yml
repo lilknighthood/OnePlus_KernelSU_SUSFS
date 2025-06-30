@@ -81,8 +81,6 @@ jobs:
       - name: Create Build Action
         run: |
           mkdir -p .github/actions
-          
-          # Tạo action.yml cho build process
           cat > .github/actions/action.yml << 'EOF'
           name: 'Build OnePlus Kernel'
           description: 'Build OnePlus kernel with power saving support'
@@ -113,127 +111,36 @@ jobs:
                 shell: bash
                 run: |
                   echo "Starting build process..."
-                  
-                  # Thực hiện build process thực tế ở đây
-                  # (Code build sẽ được thêm vào action riêng)
                   echo "Model: ${{ inputs.model }}"
                   echo "Power Saving: ${{ inputs.power_saving_enabled }}"
           EOF
 
-      - name: Apply power saving kernel configurations
+      - name: Apply Power Saving Optimizations
+        if: ${{ inputs.enable_power_savings }}
         run: |
           echo "Applying power saving kernel configurations..."
-          DEFCONFIG=$(find arch/arm64/configs -name '*defconfig' | grep -E 'qgki|gki' | head -n1)
-          echo "Found defconfig: $DEFCONFIG"
-          if [ -f "$DEFCONFIG" ]; then
-            echo 'CONFIG_CPU_IDLE=y' >> "$DEFCONFIG"
-          else
-            echo "ERROR: Could not find defconfig file!"
-            find arch/arm64/configs -name '*defconfig'
-            exit 1
+          DEFCONFIG_PATH=""
+          if [ "${{ matrix.model }}" = "OP13r" ]; then
+            DEFCONFIG_PATH="arch/arm64/configs/vendor/pineapple-qgki_defconfig"
+          elif [ "${{ matrix.model }}" = "OP-ACE-5" ]; then
+            DEFCONFIG_PATH="arch/arm64/configs/vendor/pineapple-qgki_defconfig"
           fi
+          
           if [ -f "$DEFCONFIG_PATH" ]; then
             echo "Found defconfig at: $DEFCONFIG_PATH"
-            
-            # Backup original defconfig
             cp "$DEFCONFIG_PATH" "${DEFCONFIG_PATH}.backup"
-            
             echo "Modifying defconfig for power saving..."
-            
-            # 1. Thay đổi CPU Governor mặc định
-            sed -i 's/CONFIG_CPU_FREQ_DEFAULT_GOV_SCHEDUTIL=y/# CONFIG_CPU_FREQ_DEFAULT_GOV_SCHEDUTIL is not set/' "$DEFCONFIG_PATH"
             sed -i 's/CONFIG_CPU_FREQ_DEFAULT_GOV_PERFORMANCE=y/# CONFIG_CPU_FREQ_DEFAULT_GOV_PERFORMANCE is not set/' "$DEFCONFIG_PATH"
-            sed -i 's/CONFIG_CPU_FREQ_DEFAULT_GOV_ONDEMAND=y/# CONFIG_CPU_FREQ_DEFAULT_GOV_ONDEMAND is not set/' "$DEFCONFIG_PATH"
-            
-            # Thêm conservative governor
-            echo "" >> "$DEFCONFIG_PATH"
             echo "# Power Saving Configurations" >> "$DEFCONFIG_PATH"
             echo "CONFIG_CPU_FREQ_DEFAULT_GOV_CONSERVATIVE=y" >> "$DEFCONFIG_PATH"
-            echo "CONFIG_CPU_FREQ_GOV_CONSERVATIVE=y" >> "$DEFCONFIG_PATH"
-            echo "CONFIG_CPU_FREQ_GOV_POWERSAVE=y" >> "$DEFCONFIG_PATH"
-            
-            # 2. Giảm timer frequency
-            sed -i 's/CONFIG_HZ_1000=y/# CONFIG_HZ_1000 is not set/' "$DEFCONFIG_PATH"
-            sed -i 's/CONFIG_HZ_300=y/# CONFIG_HZ_300 is not set/' "$DEFCONFIG_PATH"
-            sed -i 's/CONFIG_HZ_250=y/# CONFIG_HZ_250 is not set/' "$DEFCONFIG_PATH"
-            sed -i 's/CONFIG_HZ=1000/CONFIG_HZ=100/' "$DEFCONFIG_PATH"
-            sed -i 's/CONFIG_HZ=300/CONFIG_HZ=100/' "$DEFCONFIG_PATH"
-            sed -i 's/CONFIG_HZ=250/CONFIG_HZ=100/' "$DEFCONFIG_PATH"
-            
-            echo "CONFIG_HZ_100=y" >> "$DEFCONFIG_PATH"
             echo "CONFIG_HZ=100" >> "$DEFCONFIG_PATH"
-            
-            # 3. Tắt CPU Boost
-            sed -i 's/CONFIG_CPU_BOOST=y/# CONFIG_CPU_BOOST is not set/' "$DEFCONFIG_PATH"
-            sed -i 's/CONFIG_DYNAMIC_STUNE_BOOST=y/# CONFIG_DYNAMIC_STUNE_BOOST is not set/' "$DEFCONFIG_PATH"
-            sed -i 's/CONFIG_CPU_INPUT_BOOST=y/# CONFIG_CPU_INPUT_BOOST is not set/' "$DEFCONFIG_PATH"
-            
-            # 4. Thay đổi I/O Scheduler mặc định
-            sed -i 's/CONFIG_DEFAULT_DEADLINE=y/# CONFIG_DEFAULT_DEADLINE is not set/' "$DEFCONFIG_PATH"
-            sed -i 's/CONFIG_DEFAULT_CFQ=y/# CONFIG_DEFAULT_CFQ is not set/' "$DEFCONFIG_PATH"
-            sed -i 's/CONFIG_DEFAULT_IOSCHED="deadline"/CONFIG_DEFAULT_IOSCHED="bfq"/' "$DEFCONFIG_PATH"
-            sed -i 's/CONFIG_DEFAULT_IOSCHED="cfq"/CONFIG_DEFAULT_IOSCHED="bfq"/' "$DEFCONFIG_PATH"
-            
             echo "CONFIG_IOSCHED_BFQ=y" >> "$DEFCONFIG_PATH"
-            echo "CONFIG_BFQ_GROUP_IOSCHED=y" >> "$DEFCONFIG_PATH"
-            echo "CONFIG_DEFAULT_BFQ=y" >> "$DEFCONFIG_PATH"
-            echo 'CONFIG_DEFAULT_IOSCHED="bfq"' >> "$DEFCONFIG_PATH"
-            
-            # 5. Power management enhancements
             echo "CONFIG_WQ_POWER_EFFICIENT_DEFAULT=y" >> "$DEFCONFIG_PATH"
-            echo "CONFIG_PM_WAKELOCKS_LIMIT=100" >> "$DEFCONFIG_PATH"
-            echo "CONFIG_PM_WAKELOCKS_GC=y" >> "$DEFCONFIG_PATH"
-            
-            # 6. Thermal throttling sớm hơn
-            echo "CONFIG_THERMAL_EMERGENCY_POWEROFF_DELAY_MS=1000" >> "$DEFCONFIG_PATH"
-            
-            # 7. Giảm performance cho GPU
-            sed -i 's/CONFIG_DRM_MSM_GPU_SUDO=y/# CONFIG_DRM_MSM_GPU_SUDO is not set/' "$DEFCONFIG_PATH"
-            
-            # 8. Tắt các tính năng high performance
-            sed -i 's/CONFIG_SCHED_BOOST=y/# CONFIG_SCHED_BOOST is not set/' "$DEFCONFIG_PATH"
-            sed -i 's/CONFIG_SCHED_WALT=y/# CONFIG_SCHED_WALT is not set/' "$DEFCONFIG_PATH"
-            
-            echo "Power saving defconfig modifications applied!"
-            
-            # Hiển thị những thay đổi đã áp dụng
-            echo ""
-            echo "Changes applied:"
-            echo "- CPU Governor: Conservative (instead of Performance/Schedutil)"
-            echo "- Timer Frequency: 100Hz (instead of 1000Hz)"
-            echo "- CPU Boost: Disabled"
-            echo "- I/O Scheduler: BFQ (instead of Deadline/CFQ)"
-            echo "- Power Efficient Workqueue: Enabled"
-            echo "- Thermal Throttling: More aggressive"
-            echo "- GPU Performance Features: Disabled"
-            
+            echo "Modifications applied!"
           else
             echo "ERROR: Could not find defconfig file at $DEFCONFIG_PATH"
-            echo "Available defconfig files:"
-            find . -name "*defconfig" -type f | head -10
             exit 1
           fi
-          
-          # Tạo script để modify CPU frequencies trong kernel source
-          cat << 'EOF' > modify_cpu_freq.sh
-          #!/bin/bash
-          echo "Modifying CPU frequency tables for power saving..."
-          
-          # Tìm các file frequency table
-          find . -name "*.c" -type f -exec grep -l "cpufreq.*table\|freq.*table" {} \; | while read file; do
-            if [[ "$file" == *"cpufreq"* ]] || [[ "$file" == *"clock"* ]]; then
-              echo "Processing: $file"
-              
-              # Giảm 50% max frequencies trong các bảng tần số
-              sed -i 's/\([0-9]\{7,\}\)/\1\/2/g' "$file" 2>/dev/null || true
-            fi
-          done
-          
-          echo "CPU frequency modifications completed"
-          EOF
-          
-          chmod +x modify_cpu_freq.sh
-          ./modify_cpu_freq.sh
 
       - name: Build Kernel
         uses: ./.github/actions
@@ -252,50 +159,31 @@ jobs:
         if: ${{ inputs.enable_power_savings }}
         run: |
           echo "Verifying power saving configurations..."
-          
-          # Kiểm tra trong output build
           if [ -f "out/.config" ]; then
             echo "Checking applied kernel configurations:"
-            
-            # Kiểm tra CPU Governor
             if grep -q "CONFIG_CPU_FREQ_DEFAULT_GOV_CONSERVATIVE=y" out/.config; then
               echo "✅ Conservative CPU Governor applied"
             else
               echo "❌ Conservative CPU Governor NOT applied"
             fi
-            
-            # Kiểm tra Timer Frequency
             if grep -q "CONFIG_HZ=100" out/.config; then
               echo "✅ 100Hz Timer Frequency applied"
             else
               echo "❌ 100Hz Timer Frequency NOT applied"
             fi
-            
-            # Kiểm tra I/O Scheduler
-            if grep -q 'CONFIG_DEFAULT_IOSCHED="bfq"' out/.config; then
+            if grep -q 'CONFIG_IOSCHED_BFQ=y' out/.config; then
               echo "✅ BFQ I/O Scheduler applied"
             else
               echo "❌ BFQ I/O Scheduler NOT applied"
             fi
-            
-            # Kiểm tra CPU Boost
             if ! grep -q "CONFIG_CPU_BOOST=y" out/.config; then
               echo "✅ CPU Boost disabled"
             else
               echo "❌ CPU Boost still enabled"
             fi
-            
-            # Kiểm tra Power Efficient Workqueue
-            if grep -q "CONFIG_WQ_POWER_EFFICIENT_DEFAULT=y" out/.config; then
-              echo "✅ Power Efficient Workqueue enabled"
-            else
-              echo "❌ Power Efficient Workqueue NOT enabled"
-            fi
-            
             echo ""
             echo "Summary of power saving features in built kernel:"
-            grep -E "(CONFIG_CPU_FREQ_DEFAULT_GOV_|CONFIG_HZ=|CONFIG_DEFAULT_IOSCHED|CONFIG_CPU_BOOST|CONFIG_WQ_POWER_EFFICIENT)" out/.config || echo "Some configurations not found"
-            
+            grep -E "(CONFIG_CPU_FREQ_DEFAULT_GOV_|CONFIG_HZ=|CONFIG_IOSCHED|CONFIG_CPU_BOOST|CONFIG_WQ_POWER_EFFICIENT)" out/.config || echo "Some configurations not found"
           else
             echo "❌ Build output .config not found"
           fi
@@ -311,35 +199,10 @@ jobs:
       RELEASE_NAME: "*TEST BUILD* OnePlus Kernels With KernelSU Next & SUSFS v1.5.8 + Power Saving *TEST BUILD*"
       RELEASE_NOTES: |
         This release contains KernelSU Next and SUSFS v1.5.8 with Power Saving Optimizations
-        
-        Module: 
-        -> https://github.com/sidex15/ksu_module_susfs
-
-        Non-Official Managers:
-        -> https://github.com/KernelSU-Next/KernelSU-Next
-
         Features:
         [+] KernelSU-Next
         [+] SUSFS v1.5.8
-        [+] Wireguard Support
-        [+] Maphide LineageOS Detections
-        [+] Futile Maphide for jit-zygote-cache Detections
-        [+] Magic Mount Support
-        [+] Ptrace message leak fix for kernels < 5.16
-        [+] CMD_SUSFS_HIDE_SUS_MNTS_FOR_ALL_PROCS Support for all kernels.
-        [+] Manual Hooks [scope_min_manual_hooks_v1.4]
-        [+] CONFIG_TMPFS_XATTR Support [Mountify Support]
-        [+] BBR v1 Support.
-        
-        Power Saving Features (when enabled):
-        [+] Conservative CPU Governor (reduces performance ~50%)
-        [+] Aggressive thermal throttling
-        [+] Enhanced power management
-        [+] BFQ I/O scheduler for better battery life
-        [+] Reduced timer frequency (100Hz)
-        [+] Power efficient workqueue
-        [+] Memory compression optimizations
-        [+] GPU power saving modes
+        [+] Power Saving Features
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
@@ -350,19 +213,12 @@ jobs:
           LATEST_TAG=$(gh api repos/$REPO_OWNER/$REPO_NAME/tags --jq '.[0].name')
           if [ -z "$LATEST_TAG" ]; then
             LATEST_TAG="$BASE_TAG"
-          else
-            LATEST_TAG=$(printf "%s\n%s\n" "$LATEST_TAG" "$BASE_TAG" | sort -rV | head -n1)
           fi
           NEW_TAG=$(echo "$LATEST_TAG" | awk -F'-r' '{suffix=$2; if (!suffix) suffix=0; suffix++; printf "%s-r%d", $1, suffix}')
           echo "New tag: $NEW_TAG"
           echo "NEW_TAG=${NEW_TAG}" >> $GITHUB_ENV
           git tag $NEW_TAG
           git push origin $NEW_TAG
-
-      - name: Download Artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: ./downloaded-artifacts
 
       - name: Create GitHub Release
         uses: actions/create-release@v1
@@ -373,21 +229,3 @@ jobs:
           body: ${{ env.RELEASE_NOTES }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Upload Release Assets Dynamically
-        run: |
-          for file in ./downloaded-artifacts/kernel-*/*; do
-              if [ -d "$file" ]; then
-                  continue
-              fi
-              echo "Uploading $file..."
-              gh release upload ${{ env.NEW_TAG }} "$file"
-          done
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NEW_TAG: ${{ env.NEW_TAG }}
-
-      - name: Display Files Uploaded
-        run: |
-          echo "GitHub release created with the following files:"
-          ls ./downloaded-artifacts/**/*
