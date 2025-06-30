@@ -24,29 +24,14 @@ on:
         description: "Choose SusFS Branch for android14-6.1"
         type: string
         default: "gki-android14-6.1"
-      android15-6_6_susfs_branch:
-        description: "Choose SusFS Branch for android15-6.6"
-        type: string
-        default: "gki-android15-6.6"
-      enable_power_savings:
-        description: "Enable power saving optimizations (reduces performance by ~50%)"
-        required: true
-        type: boolean
-        default: true
 
 jobs:
   build-ace5-13r:
-    name: build-ace5-13r (${{ matrix.model }}, ${{ matrix.soc }}, ${{ matrix.branch }}, ${{ matrix.manifest }}, ${{ matrix.android_version }}, ${{ matrix.kernel_version }}, ${{ inputs.ksun_branch }})
+    name: build-ace5 (${{ matrix.model }}, ${{ matrix.soc }}, ${{ matrix.branch }}, ${{ matrix.manifest }}, ${{ matrix.android_version }}, ${{ matrix.kernel_version }}, ${{ inputs.ksun_branch }})
     strategy:
       fail-fast: false
       matrix:
         include:
-          - model: OP13r
-            soc: pineapple
-            branch: oneplus/sm8650
-            manifest: oneplus_13r.xml
-            android_version: android14
-            kernel_version: "6.1"
           - model: OP-ACE-5
             soc: pineapple
             branch: oneplus/sm8650
@@ -77,70 +62,8 @@ jobs:
           fi
           
           echo "susfs_branch=$SUSFS_BRANCH" >> $GITHUB_OUTPUT
-
-      - name: Create Build Action
-        run: |
-          mkdir -p .github/actions
-          cat > .github/actions/action.yml << 'EOF'
-          name: 'Build OnePlus Kernel'
-          description: 'Build OnePlus kernel with power saving support'
-          inputs:
-            model:
-              required: true
-            soc:
-              required: true  
-            branch:
-              required: true
-            manifest:
-              required: true
-            android_version:
-              required: true
-            kernel_version:
-              required: true
-            ksun_branch:
-              required: true
-            susfs_branch:
-              required: true
-            power_saving_enabled:
-              required: false
-              default: 'false'
-          runs:
-            using: 'composite'
-            steps:
-              - name: Build Kernel with Power Saving
-                shell: bash
-                run: |
-                  echo "Starting build process..."
-                  echo "Model: ${{ inputs.model }}"
-                  echo "Power Saving: ${{ inputs.power_saving_enabled }}"
-          EOF
-
-      - name: Apply Power Saving Optimizations
-        if: ${{ inputs.enable_power_savings }}
-        run: |
-          echo "Applying power saving kernel configurations..."
-          DEFCONFIG_PATH=""
-          if [ "${{ matrix.model }}" = "OP13r" ]; then
-            DEFCONFIG_PATH="arch/arm64/configs/vendor/pineapple-qgki_defconfig"
-          elif [ "${{ matrix.model }}" = "OP-ACE-5" ]; then
-            DEFCONFIG_PATH="arch/arm64/configs/vendor/pineapple-qgki_defconfig"
-          fi
-          
-          if [ -f "$DEFCONFIG_PATH" ]; then
-            echo "Found defconfig at: $DEFCONFIG_PATH"
-            cp "$DEFCONFIG_PATH" "${DEFCONFIG_PATH}.backup"
-            echo "Modifying defconfig for power saving..."
-            sed -i 's/CONFIG_CPU_FREQ_DEFAULT_GOV_PERFORMANCE=y/# CONFIG_CPU_FREQ_DEFAULT_GOV_PERFORMANCE is not set/' "$DEFCONFIG_PATH"
-            echo "# Power Saving Configurations" >> "$DEFCONFIG_PATH"
-            echo "CONFIG_CPU_FREQ_DEFAULT_GOV_CONSERVATIVE=y" >> "$DEFCONFIG_PATH"
-            echo "CONFIG_HZ=100" >> "$DEFCONFIG_PATH"
-            echo "CONFIG_IOSCHED_BFQ=y" >> "$DEFCONFIG_PATH"
-            echo "CONFIG_WQ_POWER_EFFICIENT_DEFAULT=y" >> "$DEFCONFIG_PATH"
-            echo "Modifications applied!"
-          else
-            echo "ERROR: Could not find defconfig file at $DEFCONFIG_PATH"
-            exit 1
-          fi
+      - name: Checkout Code
+        uses: actions/checkout@v3
 
       - name: Build Kernel
         uses: ./.github/actions
@@ -153,56 +76,35 @@ jobs:
           kernel_version: ${{ matrix.kernel_version }}
           ksun_branch: ${{ inputs.ksun_branch }}
           susfs_branch: ${{ steps.get-susfs-branch.outputs.susfs_branch }}
-          power_saving_enabled: ${{ inputs.enable_power_savings }}
-
-      - name: Verify Power Saving Applied
-        if: ${{ inputs.enable_power_savings }}
-        run: |
-          echo "Verifying power saving configurations..."
-          if [ -f "out/.config" ]; then
-            echo "Checking applied kernel configurations:"
-            if grep -q "CONFIG_CPU_FREQ_DEFAULT_GOV_CONSERVATIVE=y" out/.config; then
-              echo "✅ Conservative CPU Governor applied"
-            else
-              echo "❌ Conservative CPU Governor NOT applied"
-            fi
-            if grep -q "CONFIG_HZ=100" out/.config; then
-              echo "✅ 100Hz Timer Frequency applied"
-            else
-              echo "❌ 100Hz Timer Frequency NOT applied"
-            fi
-            if grep -q 'CONFIG_IOSCHED_BFQ=y' out/.config; then
-              echo "✅ BFQ I/O Scheduler applied"
-            else
-              echo "❌ BFQ I/O Scheduler NOT applied"
-            fi
-            if ! grep -q "CONFIG_CPU_BOOST=y" out/.config; then
-              echo "✅ CPU Boost disabled"
-            else
-              echo "❌ CPU Boost still enabled"
-            fi
-            echo ""
-            echo "Summary of power saving features in built kernel:"
-            grep -E "(CONFIG_CPU_FREQ_DEFAULT_GOV_|CONFIG_HZ=|CONFIG_IOSCHED|CONFIG_CPU_BOOST|CONFIG_WQ_POWER_EFFICIENT)" out/.config || echo "Some configurations not found"
-          else
-            echo "❌ Build output .config not found"
-          fi
 
   trigger-release:
-    needs: build-ace5-13r
+    needs: build-ace5
     runs-on: ubuntu-latest
     if: ${{ inputs.make_release }}
     env:
       REPO_OWNER: ${{ github.repository_owner }}
       REPO_NAME: ${{ github.event.repository.name }}
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      RELEASE_NAME: "*TEST BUILD* OnePlus Kernels With KernelSU Next & SUSFS v1.5.8 + Power Saving *TEST BUILD*"
+      RELEASE_NAME: "*TEST BUILD* OnePlus Kernels With KernelSU Next & SUSFS v1.5.8 *TEST BUILD*"
       RELEASE_NOTES: |
-        This release contains KernelSU Next and SUSFS v1.5.8 with Power Saving Optimizations
+        This release contains KernelSU Next and SUSFS v1.5.8
+        
+        Module: 
+        -> https://github.com/sidex15/ksu_module_susfs
+        Non-Official Managers:
+        -> https://github.com/KernelSU-Next/KernelSU-Next
         Features:
         [+] KernelSU-Next
         [+] SUSFS v1.5.8
-        [+] Power Saving Features
+        [+] Wireguard Support
+        [+] Maphide LineageOS Detections
+        [+] Futile Maphide for jit-zygote-cache Detections
+        [+] Magic Mount Support
+        [+] Ptrace message leak fix for kernels < 5.16
+        [+] CMD_SUSFS_HIDE_SUS_MNTS_FOR_ALL_PROCS Support for all kernels.
+        [+] Manual Hooks [scope_min_manual_hooks_v1.4]
+        [+] CONFIG_TMPFS_XATTR Support [Mountify Support]
+        [+] BBR v1 Support.
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
@@ -213,12 +115,18 @@ jobs:
           LATEST_TAG=$(gh api repos/$REPO_OWNER/$REPO_NAME/tags --jq '.[0].name')
           if [ -z "$LATEST_TAG" ]; then
             LATEST_TAG="$BASE_TAG"
+          else
+            LATEST_TAG=$(printf "%s\n%s\n" "$LATEST_TAG" "$BASE_TAG" | sort -rV | head -n1)
           fi
           NEW_TAG=$(echo "$LATEST_TAG" | awk -F'-r' '{suffix=$2; if (!suffix) suffix=0; suffix++; printf "%s-r%d", $1, suffix}')
           echo "New tag: $NEW_TAG"
           echo "NEW_TAG=${NEW_TAG}" >> $GITHUB_ENV
           git tag $NEW_TAG
           git push origin $NEW_TAG
+      - name: Download Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./downloaded-artifacts
 
       - name: Create GitHub Release
         uses: actions/create-release@v1
@@ -229,3 +137,21 @@ jobs:
           body: ${{ env.RELEASE_NOTES }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload Release Assets Dynamically
+        run: |
+          for file in ./downloaded-artifacts/kernel-*/*; do
+              if [ -d "$file" ]; then
+                  continue
+              fi
+              echo "Uploading $file..."
+              gh release upload ${{ env.NEW_TAG }} "$file"
+          done
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NEW_TAG: ${{ env.NEW_TAG }}
+
+      - name: Display Files Uploaded
+        run: |
+          echo "GitHub release created with the following files:"
+          ls ./downloaded-artifacts/**/*
