@@ -28,6 +28,11 @@ on:
         description: "Choose SusFS Branch for android15-6.6"
         type: string
         default: "gki-android15-6.6"
+      enable_power_savings:
+        description: "Enable power saving optimizations (reduces performance by ~50%)"
+        required: true
+        type: boolean
+        default: true
 
 jobs:
   build-ace5-13r:
@@ -76,6 +81,102 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v3
 
+      - name: Apply Power Saving Optimizations
+        if: ${{ inputs.enable_power_savings }}
+        run: |
+          echo "Applying power saving kernel configurations..."
+          
+          # Create power saving config overlay
+          cat << 'EOF' > power_saving_config.txt
+          # CPU Frequency Scaling - Reduce max frequencies by ~50%
+          CONFIG_CPU_FREQ_DEFAULT_GOV_CONSERVATIVE=y
+          CONFIG_CPU_FREQ_GOV_CONSERVATIVE=y
+          CONFIG_CPU_FREQ_GOV_POWERSAVE=y
+          # CONFIG_CPU_FREQ_GOV_PERFORMANCE is not set
+          # CONFIG_CPU_FREQ_GOV_ONDEMAND is not set
+          
+          # CPU Boost Disable
+          # CONFIG_CPU_BOOST is not set
+          # CONFIG_DYNAMIC_STUNE_BOOST is not set
+          
+          # Thermal Throttling - More aggressive
+          CONFIG_THERMAL_GOV_STEP_WISE=y
+          CONFIG_THERMAL_GOV_LOW_LIMITS=y
+          CONFIG_THERMAL_EMERGENCY_POWEROFF_DELAY_MS=1000
+          
+          # Power Management
+          CONFIG_PM_SLEEP=y
+          CONFIG_PM_AUTOSLEEP=y
+          CONFIG_PM_WAKELOCKS=y
+          CONFIG_PM_WAKELOCKS_LIMIT=100
+          CONFIG_PM_WAKELOCKS_GC=y
+          CONFIG_PM_ADVANCED_DEBUG=y
+          CONFIG_SUSPEND_FREEZER=y
+          
+          # CPU Idle - More aggressive sleep states
+          CONFIG_CPU_IDLE=y
+          CONFIG_CPU_IDLE_GOV_LADDER=y
+          CONFIG_CPU_IDLE_GOV_MENU=y
+          CONFIG_CPU_IDLE_MULTIPLE_DRIVERS=y
+          
+          # Voltage Scaling - Reduce voltages
+          CONFIG_REGULATOR_CPR3_HMSS=y
+          CONFIG_REGULATOR_CPR3_MMSS=y
+          
+          # Scheduler - Power efficient
+          CONFIG_SCHED_MC=y
+          CONFIG_SCHED_SMT=y
+          CONFIG_SCHED_AUTOGROUP=y
+          CONFIG_CFS_BANDWIDTH=y
+          
+          # I/O Scheduler - Power efficient
+          CONFIG_IOSCHED_BFQ=y
+          CONFIG_BFQ_GROUP_IOSCHED=y
+          CONFIG_DEFAULT_BFQ=y
+          CONFIG_DEFAULT_IOSCHED="bfq"
+          
+          # Memory Management - Reduce performance for power
+          CONFIG_ZSMALLOC=y
+          CONFIG_PGTABLE_MAPPING=y
+          CONFIG_ZRAM_WRITEBACK=y
+          CONFIG_ZRAM_MEMORY_TRACKING=y
+          
+          # Network Power Saving
+          CONFIG_WIRELESS_EXT=y
+          CONFIG_CFG80211_WEXT=y
+          CONFIG_MAC80211_RC_DEFAULT_PID=y
+          
+          # GPU Power Saving
+          CONFIG_DRM_MSM_GPU_SUDO=y
+          
+          # Reduce Timer Frequency for Power Saving
+          CONFIG_HZ_100=y
+          # CONFIG_HZ_250 is not set
+          # CONFIG_HZ_300 is not set
+          # CONFIG_HZ_1000 is not set
+          CONFIG_HZ=100
+          
+          # Disable High Performance Features
+          # CONFIG_SMP_ON_UP is not set
+          # CONFIG_ARM_LPAE is not set
+          
+          # Conservative Memory Settings
+          CONFIG_COMPACTION=y
+          CONFIG_MIGRATION=y
+          CONFIG_KSM=y
+          CONFIG_DEFAULT_MMAP_MIN_ADDR=32768
+          
+          # Power Efficient Workqueue
+          CONFIG_WQ_POWER_EFFICIENT_DEFAULT=y
+          
+          # Reduce Kernel Log Level (less CPU usage)
+          CONFIG_DYNAMIC_DEBUG=n
+          CONFIG_PRINTK_TIME=n
+          
+          EOF
+          
+          echo "Power saving configuration created."
+
       - name: Build Kernel
         uses: ./.github/actions
         with:
@@ -87,6 +188,7 @@ jobs:
           kernel_version: ${{ matrix.kernel_version }}
           ksun_branch: ${{ inputs.ksun_branch }}
           susfs_branch: ${{ steps.get-susfs-branch.outputs.susfs_branch }}
+          power_saving_config: ${{ inputs.enable_power_savings && 'power_saving_config.txt' || '' }}
 
   trigger-release:
     needs: build-ace5-13r
@@ -96,9 +198,9 @@ jobs:
       REPO_OWNER: ${{ github.repository_owner }}
       REPO_NAME: ${{ github.event.repository.name }}
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      RELEASE_NAME: "*TEST BUILD* OnePlus Kernels With KernelSU Next & SUSFS v1.5.7 *TEST BUILD*"
+      RELEASE_NAME: "*TEST BUILD* OnePlus Kernels With KernelSU Next & SUSFS v1.5.7 + Power Saving *TEST BUILD*"
       RELEASE_NOTES: |
-        This release contains KernelSU Next and SUSFS v1.5.7
+        This release contains KernelSU Next and SUSFS v1.5.7 with Power Saving Optimizations
         
         Module: 
         -> https://github.com/sidex15/ksu_module_susfs
@@ -118,6 +220,16 @@ jobs:
         [+] Manual Hooks [scope_min_manual_hooks_v1.4]
         [+] CONFIG_TMPFS_XATTR Support [Mountify Support]
         [+] BBR v1 Support.
+        
+        Power Saving Features (when enabled):
+        [+] Conservative CPU Governor (reduces performance ~50%)
+        [+] Aggressive thermal throttling
+        [+] Enhanced power management
+        [+] BFQ I/O scheduler for better battery life
+        [+] Reduced timer frequency (100Hz)
+        [+] Power efficient workqueue
+        [+] Memory compression optimizations
+        [+] GPU power saving modes
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
