@@ -120,19 +120,19 @@ jobs:
                   echo "Power Saving: ${{ inputs.power_saving_enabled }}"
           EOF
 
-      - name: Apply Power Saving Optimizations
-        if: ${{ inputs.enable_power_savings }}
+      - name: Apply power saving kernel configurations
         run: |
           echo "Applying power saving kernel configurations..."
-          
-          # Tìm file defconfig của device
-          DEFCONFIG_PATH=""
-          if [ "${{ matrix.model }}" = "OP13r" ]; then
-            DEFCONFIG_PATH="arch/arm64/configs/vendor/pineapple-qgki_defconfig"
-          elif [ "${{ matrix.model }}" = "OP-ACE-5" ]; then
-            DEFCONFIG_PATH="arch/arm64/configs/vendor/pineapple-qgki_defconfig"
+          DEFCONFIG=$(find arch/arm64/configs/vendor -name '*qgki_defconfig' | head -n1)
+          echo "Found defconfig: $DEFCONFIG"
+          if [ -f "$DEFCONFIG" ]; then
+            echo 'CONFIG_CPU_IDLE=y' >> "$DEFCONFIG"
+            echo 'CONFIG_SOME_POWER_SAVING_FEATURE=y' >> "$DEFCONFIG"
+          else
+            echo "ERROR: Could not find defconfig file!"
+            find arch/arm64/configs/vendor -name '*defconfig'
+            exit 1
           fi
-          
           if [ -f "$DEFCONFIG_PATH" ]; then
             echo "Found defconfig at: $DEFCONFIG_PATH"
             
