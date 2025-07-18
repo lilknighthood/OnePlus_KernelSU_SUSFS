@@ -1,353 +1,100 @@
-name: Build and Release OnePlus Kernels
-
-permissions:
-  contents: write
-  actions: write
+name: Build Kernel Release
 
 on:
   workflow_dispatch:
     inputs:
-      make_release:
-        description: 'Do you want to create a release?'
+      compiler:
+        description: 'Select a compiler'
         required: true
-        type: boolean
-        default: false
-      ksun_branch:
-        description: "Choose KernelSU Next Branch"
-        required: true
+        default: 'clang'
         type: choice
         options:
-          - stable
-          - next
-        default: next
-      android12-5_10_susfs_branch:
-        description: "Choose SusFS Branch for android12-5.10"
-        type: string
-        default: "gki-android12-5.10"
-      android13-5_10_susfs_branch:
-        description: "Choose SusFS Branch for android13-5.10"
-        type: string
-        default: "gki-android13-5.10"
-      android13-5_15_susfs_branch:
-        description: "Choose SusFS Branch for android13-5.15"
-        type: string
-        default: "gki-android13-5.15"
-      android14-5_15_susfs_branch:
-        description: "Choose SusFS Branch for android14-5.15"
-        type: string
-        default: "gki-android14-5.15"
-      android14-6_1_susfs_branch:
-        description: "Choose SusFS Branch for android14-6.1"
-        type: string
-        default: "gki-android14-6.1"
-      android15-6_6_susfs_branch:
-        description: "Choose SusFS Branch for android15-6.6"
-        type: string
-        default: "gki-android15-6.6"
+          - clang
+          - gcc
+      defconfig:
+        description: 'Select Kernel Profile'
+        required: true
+        default: 'per_defconfig'
+        type: choice
+        options:
+          - per_defconfig
+          - per_powersave_defconfig
+      ksu_enable:
+        description: 'Enable KernelSU'
+        required: true
+        default: true
+        type: boolean
+      anykernel:
+        description: 'Build AnyKernel3 zip'
+        required: true
+        default: true
+        type: boolean
 
 jobs:
-  build-batch-1: # Non Bazel Builds
-    name: build-batch-1 (${{ matrix.model }}, ${{ matrix.soc }}, ${{ matrix.branch }}, ${{ matrix.manifest }}, ${{ matrix.android_version }}, ${{ matrix.kernel_version }}, ${{ inputs.ksun_branch }})
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - model: OP11
-            soc: kalama
-            branch: oneplus/sm8550
-            manifest: oneplus_11_v.xml
-            android_version: android13
-            kernel_version: "5.15"
-          - model: OP11r
-            soc: waipio
-            branch: oneplus/sm8475
-            manifest: oneplus_11r_v.xml
-            android_version: android12
-            kernel_version: "5.10"
-          - model: OP-OPEN
-            soc: kalama
-            branch: oneplus/sm8550
-            manifest: oneplus_open_v.xml
-            android_version: android13
-            kernel_version: "5.15"
-          - model: OP-ACE-2
-            soc: waipio
-            branch: oneplus/sm8475
-            manifest: oneplus_ace2_v.xml
-            android_version: android12
-            kernel_version: "5.10"
-          - model: OP10t
-            soc: waipio
-            branch: oneplus/sm8475
-            manifest: oneplus_10t_v.xml
-            android_version: android12
-            kernel_version: "5.10"
-          - model: OP10pro
-            soc: waipio
-            branch: oneplus/sm8450
-            manifest: oneplus_10_pro_v.xml
-            android_version: android12
-            kernel_version: "5.10"
-          - model: OP-ACE-2-PRO
-            soc: kalama
-            branch: oneplus/sm8550
-            manifest: oneplus_ace2_pro_v.xml
-            android_version: android13
-            kernel_version: "5.15"
-          - model: OP12r
-            soc: kalama
-            branch: oneplus/sm8550
-            manifest: oneplus_12r_v.xml
-            android_version: android13
-            kernel_version: "5.15"
-    runs-on: ubuntu-latest
+  build_kernel:
+    name: Build Kernel with ${{ github.event.inputs.defconfig }}
+    runs-on: ubuntu-22.04
     steps:
-      - name: Select Appropriate SusFS Branch
-        id: get-susfs-branch
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Prepare environment
         run: |
-          KERNEL_STRING="${{ matrix.android_version }}-${{ matrix.kernel_version }}"
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends bc build-essential zip curl libstdc++6 git wget libssl-dev libncurses5-dev bison flex
           
-          case "$KERNEL_STRING" in
-            "android12-5.10")
-              SUSFS_BRANCH="${{ inputs.android12-5_10_susfs_branch }}"
-              ;;
-            "android13-5.10")
-              SUSFS_BRANCH="${{ inputs.android13-5_10_susfs_branch }}"
-              ;;
-            "android13-5.15")
-              SUSFS_BRANCH="${{ inputs.android13-5_15_susfs_branch }}"
-              ;;
-            "android14-5.15")
-              SUSFS_BRANCH="${{ inputs.android14-5_15_susfs_branch }}"
-              ;;
-            "android14-6.1")
-              SUSFS_BRANCH="${{ inputs.android14-6_1_susfs_branch }}"
-              ;;
-            "android15-6.6")
-              SUSFS_BRANCH="${{ inputs.android15-6_6_susfs_branch }}"
-              ;;
-            *)
-              echo "Invalid kernel version or unsupported: $KERNEL_STRING"
-              exit 1
-              ;;
-          esac
-          
-          if [[ -z "$SUSFS_BRANCH" ]]; then
-            SUSFS_BRANCH="gki-${{ matrix.android_version }}-${{ matrix.kernel_version }}"
+      - name: Setup Build Variables
+        run: |
+          echo "ARCH=arm64" >> $GITHUB_ENV
+          echo "KBUILD_BUILD_USER=lilknighthood" >> $GITHUB_ENV
+          echo "KBUILD_BUILD_HOST=GitHub-Actions" >> $GITHUB_ENV
+          echo "TZ=Asia/Ho_Chi_Minh" >> $GITHUB_ENV
+          if [ "${{ github.event.inputs.compiler }}" == "clang" ]; then
+            echo "CC=clang" >> $GITHUB_ENV
+            echo "CROSS_COMPILE=aarch64-linux-gnu-" >> $GITHUB_ENV
+            echo "CROSS_COMPILE_ARM32=arm-linux-gnueabi-" >> $GITHUB_ENV
+          else
+            echo "CROSS_COMPILE=/opt/gcc64/bin/aarch64-elf-" >> $GITHUB_ENV
+            echo "CROSS_COMPILE_ARM32=/opt/gcc32/bin/arm-eabi-" >> $GITHUB_ENV
+          fi
+
+      - name: Setup Toolchain
+        run: |
+          if [ "${{ github.event.inputs.compiler }}" == "clang" ]; then
+            git clone --depth=1 https://github.com/Neutron-Toolchains/proton-clang.git clang-toolchain
+            echo "PATH=/home/runner/work/OnePlus_KernelSU_SUSFS/OnePlus_KernelSU_SUSFS/clang-toolchain/bin:$PATH" >> $GITHUB_ENV
+          else
+            sudo mkdir /opt/gcc64
+            sudo mkdir /opt/gcc32
+            git clone --depth=1 https://github.com/mvaisakh/gcc-arm64.git /opt/gcc64
+            git clone --depth=1 https://github.com/mvaisakh/gcc-arm.git /opt/gcc32
           fi
           
-          echo "susfs_branch=$SUSFS_BRANCH" >> $GITHUB_OUTPUT
-
-      - name: Checkout Code
-        uses: actions/checkout@v3
+      - name: Setup KernelSU
+        if: github.event.inputs.ksu_enable == 'true'
+        run: |
+          curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -
+          source "scripts/setup-ksu.sh"
 
       - name: Build Kernel
-        uses: ./.github/actions/
-        with:
-          model: ${{ matrix.model }}
-          soc: ${{ matrix.soc }}
-          branch: ${{ matrix.branch }}
-          manifest: ${{ matrix.manifest }}
-          android_version: ${{ matrix.android_version }}
-          kernel_version: ${{ matrix.kernel_version }}
-          ksun_branch: ${{ inputs.ksun_branch }}
-          susfs_branch: ${{ steps.get-susfs-branch.outputs.susfs_branch }}
-
-  build-batch-2:
-    # needs: build-batch-1
-    name: build-batch-2 (${{ matrix.model }}, ${{ matrix.soc }}, ${{ matrix.branch }}, ${{ matrix.manifest }}, ${{ matrix.android_version }}, ${{ matrix.kernel_version }}, ${{ inputs.ksun_branch }})
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - model: OP13
-            soc: sun
-            branch: oneplus/sm8750
-            manifest: oneplus_13.xml
-            android_version: android15
-            kernel_version: "6.6"
-          - model: OPAce5Pro
-            soc: sun
-            branch: oneplus/sm8750
-            manifest: oneplus_ace5_pro.xml
-            android_version: android15
-            kernel_version: "6.6"
-          - model: OP12
-            soc: pineapple
-            branch: oneplus/sm8650
-            manifest: oneplus12_v.xml
-            android_version: android14
-            kernel_version: "6.1"
-          - model: OP13r
-            soc: pineapple
-            branch: oneplus/sm8650
-            manifest: oneplus_13r.xml
-            android_version: android14
-            kernel_version: "6.1"
-          - model: OP-ACE-5
-            soc: pineapple
-            branch: oneplus/sm8650
-            manifest: oneplus_ace5.xml
-            android_version: android14
-            kernel_version: "6.1"
-          - model: OP-ACE-3V
-            soc: pineapple
-            branch: oneplus/sm7675
-            manifest: oneplus_ace_3v_v.xml
-            android_version: android14
-            kernel_version: "6.1"
-          - model: OP-NORD-4
-            soc: pineapple
-            branch: oneplus/sm7675
-            manifest: oneplus_nord_4_v.xml
-            android_version: android14
-            kernel_version: "6.1"
-          - model: OP-PAD-2
-            soc: pineapple
-            branch: oneplus/sm8650
-            manifest: oneplus_pad2_v.xml
-            android_version: android14
-            kernel_version: "6.1"
-          - model: OP13S
-            soc: sun
-            branch: oneplus/sm8750
-            manifest: oneplus_13s.xml
-            android_version: android15
-            kernel_version: "6.6"
-    runs-on: ubuntu-latest
-    steps:
-      - name: Select Appropriate SusFS Branch
-        id: get-susfs-branch
         run: |
-          KERNEL_STRING="${{ matrix.android_version }}-${{ matrix.kernel_version }}"
-          
-          case "$KERNEL_STRING" in
-            "android12-5.10")
-              SUSFS_BRANCH="${{ inputs.android12-5_10_susfs_branch }}"
-              ;;
-            "android13-5.10")
-              SUSFS_BRANCH="${{ inputs.android13-5_10_susfs_branch }}"
-              ;;
-            "android13-5.15")
-              SUSFS_BRANCH="${{ inputs.android13-5_15_susfs_branch }}"
-              ;;
-            "android14-5.15")
-              SUSFS_BRANCH="${{ inputs.android14-5_15_susfs_branch }}"
-              ;;
-            "android14-6.1")
-              SUSFS_BRANCH="${{ inputs.android14-6_1_susfs_branch }}"
-              ;;
-            "android15-6.6")
-              SUSFS_BRANCH="${{ inputs.android15-6_6_susfs_branch }}"
-              ;;
-            *)
-              echo "Invalid kernel version or unsupported: $KERNEL_STRING"
-              exit 1
-              ;;
-          esac
-          
-          if [[ -z "$SUSFS_BRANCH" ]]; then
-            SUSFS_BRANCH="gki-${{ matrix.android_version }}-${{ matrix.kernel_version }}"
-          fi
-          
-          echo "susfs_branch=$SUSFS_BRANCH" >> $GITHUB_OUTPUT
+          make O=out ${{ github.event.inputs.defconfig }}
+          make O=out -j$(nproc --all)
 
-      - name: Checkout Code
-        uses: actions/checkout@v3
-
-      - name: Build Kernel
-        uses: ./.github/actions
-        with:
-          model: ${{ matrix.model }}
-          soc: ${{ matrix.soc }}
-          branch: ${{ matrix.branch }}
-          manifest: ${{ matrix.manifest }}
-          android_version: ${{ matrix.android_version }}
-          kernel_version: ${{ matrix.kernel_version }}
-          ksun_branch: ${{ inputs.ksun_branch }}
-          susfs_branch: ${{ steps.get-susfs-branch.outputs.susfs_branch }}
-
-  trigger-release:
-    needs:
-      - build-batch-1
-      - build-batch-2
-    runs-on: ubuntu-latest
-    if: ${{ inputs.make_release }}
-    env:
-      REPO_OWNER: ${{ github.repository_owner }}
-      REPO_NAME: ${{ github.event.repository.name }}
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      RELEASE_NAME: "*TEST BUILD* OnePlus Kernels With KernelSU Next & SUSFS v1.5.9 *TEST BUILD*"
-      RELEASE_NOTES: |
-        This release contains KernelSU Next and SUSFS v1.5.9
-        
-        Module: 
-        -> https://github.com/sidex15/ksu_module_susfs
-
-        Non-Official Managers:
-        -> https://github.com/KernelSU-Next/KernelSU-Next
-
-        Features:
-        [+] KernelSU-Next
-        [+] SUSFS v1.5.9
-        [+] Wireguard Support
-        [+] Maphide LineageOS Detections
-        [+] Futile Maphide for jit-zygote-cache Detections
-        [+] Magic Mount Support
-        [+] Ptrace message leak fix for kernels < 5.16
-        [+] Manual Hooks [scope_min_manual_hooks_v1.4]
-        [+] CONFIG_TMPFS_XATTR Support [Mountify Support]
-        [+] BBR v1 Support.
-        [+] HMBIRD scx support for OnePlus 13 & OnePlus Ace 5 Pro.
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
-
-      - name: Generate and Create New Tag
+      - name: Build AnyKernel3 Zip
+        if: github.event.inputs.anykernel == 'true'
         run: |
-            BASE_TAG="v1.5.9-r0"
-            LATEST_TAG=$(gh api repos/$REPO_OWNER/$REPO_NAME/tags --jq '.[0].name')
-            if [ -z "$LATEST_TAG" ]; then
-              LATEST_TAG="$BASE_TAG"
-            else
-              LATEST_TAG=$(printf "%s\n%s\n" "$LATEST_TAG" "$BASE_TAG" | sort -rV | head -n1)
-            fi
-            NEW_TAG=$(echo "$LATEST_TAG" | awk -F'-r' '{suffix=$2; if (!suffix) suffix=0; suffix++; printf "%s-r%d", $1, suffix}')
-            echo "New tag: $NEW_TAG"
-            echo "NEW_TAG=${NEW_TAG}" >> $GITHUB_ENV
-            git tag $NEW_TAG
-            git push origin $NEW_TAG
+          git clone --depth=1 https://github.com/osm0sis/AnyKernel3
+          cp out/arch/arm64/boot/Image AnyKernel3/
+          cd AnyKernel3
+          ZIP_NAME="Kernel-${{ github.event.inputs.defconfig }}_$(date +'%Y%m%d-%H%M').zip"
+          zip -r9 "${ZIP_NAME}" * -x .git README.md
 
-      - name: Download Artifacts
-        uses: actions/download-artifact@v4
+      - name: Upload to Release
+        uses: ncipollo/release-action@v1
         with:
-          path: ./downloaded-artifacts
-
-      - name: Create GitHub Release
-        uses: actions/create-release@v1
-        with:
-          tag_name: ${{ env.NEW_TAG }}
-          prerelease: true
-          release_name: ${{ env.RELEASE_NAME }}
-          body: ${{ env.RELEASE_NOTES }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Upload Release Assets Dynamically
-        run: |
-          for file in ./downloaded-artifacts/kernel-*/*; do
-              if [ -d "$file" ]; then
-                  continue
-              fi
-              echo "Uploading $file..."
-              gh release upload ${{ env.NEW_TAG }} "$file"
-          done
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NEW_TAG: ${{ env.NEW_TAG }}
-
-      - name: Display Files Uploaded
-        run: |
-          echo "GitHub release created with the following files:"
-          ls ./downloaded-artifacts/**/*
+          artifacts: "AnyKernel3/*.zip"
+          name: "Kernel Release - ${{ github.event.inputs.defconfig }} - $(date +'%Y-%m-%d %H:%M')"
+          tag: "${{ github.event.inputs.defconfig }}-${{ github.run_id }}"
+          token: ${{ secrets.GITHUB_TOKEN }}
+          allowUpdates: true
